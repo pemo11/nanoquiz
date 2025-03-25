@@ -1,0 +1,240 @@
+// PWA + Firebase-Version von NanoQuiz mit Google- und E-Mail-Login
+import React, { useState, useEffect } from "react";
+import { auth, db, storage } from "./firebaseConfig";
+import {
+  onAuthStateChanged,
+  signInWithPopup,
+  GoogleAuthProvider,
+  signOut,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword
+} from "firebase/auth";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { ref, uploadBytes } from "firebase/storage";
+
+function parseXml(xmlString) {
+  const parser = new DOMParser();
+  const xmlDoc = parser.parseFromString(xmlString, "application/xml");
+  const cards = Array.from(xmlDoc.getElementsByTagName("card"));
+  return cards.map((card) => ({
+    question: card.getElementsByTagName("question")[0].textContent,
+    answer: card.getElementsByTagName("answer")[0].textContent,
+  }));
+}
+
+export default function FlashcardViewer() {
+  const [cards, setCards] = useState([]);
+  const [index, setIndex] = useState(0);
+  const [showAnswer, setShowAnswer] = useState(false);
+  const [correct, setCorrect] = useState(0);
+  const [wrong, setWrong] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const [user, setUser] = useState(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isRegistering, setIsRegistering] = useState(false);
+
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/service-worker.js");
+    }
+    onAuthStateChanged(auth, (user) => {
+      setUser(user);
+    });
+  }, []);
+
+  const signInWithGoogle = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (err) {
+      console.error("Login-Fehler:", err);
+    }
+  };
+
+  const handleEmailAuth = async () => {
+    try {
+      if (isRegistering) {
+        await createUserWithEmailAndPassword(auth, email, password);
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+    } catch (err) {
+      console.error("E-Mail Login/Registrierung fehlgeschlagen:", err);
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
+
+  const nextCard = () => {
+    if (index + 1 >= cards.length) {
+      setFinished(true);
+    } else {
+      setIndex((prev) => prev + 1);
+      setShowAnswer(false);
+    }
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const parsed = parseXml(event.target.result);
+      setCards(parsed);
+      setIndex(0);
+      setShowAnswer(false);
+      setCorrect(0);
+      setWrong(0);
+      setFinished(false);
+
+      if (user) {
+        const storageRef = ref(storage, `uploads/${user.uid}/${file.name}`);
+        await uploadBytes(storageRef, file);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleAnswer = async (isCorrect) => {
+    if (isCorrect) setCorrect((prev) => prev + 1);
+    else setWrong((prev) => prev + 1);
+
+    if (user) {
+      await addDoc(collection(db, "quiz_results"), {
+        uid: user.uid,
+        question: cards[index].question,
+        correct: isCorrect,
+        timestamp: serverTimestamp()
+      });
+    }
+
+    nextCard();
+  };
+
+  const restart = () => {
+    setIndex(0);
+    setShowAnswer(false);
+    setCorrect(0);
+    setWrong(0);
+    setFinished(false);
+  };
+
+  const totalAnswered = correct + wrong;
+  const percentCorrect = totalAnswered > 0 ? ((correct / totalAnswered) * 100).toFixed(1) : 0;
+
+  return (
+    <div className="p-4 max-w-xl mx-auto">
+      <h1 className="text-3xl font-bold text-center mb-6 text-blue-600">NanoQuiz</h1>
+
+      <div className="mb-4 text-center">
+        {user ? (
+          <>
+            <p className="mb-2 text-gray-600">Angemeldet als {user.email}</p>
+            <button
+              onClick={handleLogout}
+              className="bg-red-500 text-white px-4 py-2 rounded-xl hover:bg-red-600"
+            >
+              Abmelden
+            </button>
+          </>
+        ) : (
+          <div className="space-y-3">
+            <button
+              onClick={signInWithGoogle}
+              className="bg-green-500 text-white px-4 py-2 rounded-xl hover:bg-green-600 w-full"
+            >
+              Mit Google anmelden
+            </button>
+            <input
+              type="email"
+              placeholder="E-Mail"
+              className="w-full p-2 border rounded"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <input
+              type="password"
+              placeholder="Passwort"
+              className="w-full p-2 border rounded"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <button
+              onClick={handleEmailAuth}
+              className="bg-blue-500 text-white px-4 py-2 rounded-xl hover:bg-blue-600 w-full"
+            >
+              {isRegistering ? "Registrieren" : "Einloggen"}
+            </button>
+            <p
+              className="text-sm text-blue-600 cursor-pointer hover:underline"
+              onClick={() => setIsRegistering(!isRegistering)}
+            >
+              {isRegistering ? "Schon registriert? Einloggen" : "Noch kein Konto? Jetzt registrieren"}
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="mb-4 text-center">
+        <label className="cursor-pointer inline-block bg-blue-100 text-blue-700 font-medium px-4 py-2 rounded-lg shadow hover:bg-blue-200">
+          XML-Datei auswählen
+          <input type="file" accept=".xml" onChange={handleFileUpload} className="hidden" />
+        </label>
+      </div>
+
+      {cards.length > 0 && !finished && (
+        <div className="bg-white shadow-lg rounded-2xl p-6">
+          <div className="text-sm text-gray-500 mb-2">
+            Frage {index + 1} von {cards.length}
+          </div>
+          <h2 className="text-xl font-semibold mb-4">Frage:</h2>
+          <p className="text-gray-800 text-lg mb-4">{cards[index].question}</p>
+          {showAnswer ? (
+            <>
+              <h3 className="text-lg font-semibold mb-2">Antwort:</h3>
+              <p className="text-green-700 text-md mb-4">{cards[index].answer}</p>
+              <div className="flex gap-4">
+                <button
+                  onClick={() => handleAnswer(true)}
+                  className="bg-green-500 text-white px-4 py-2 rounded-xl hover:bg-green-600"
+                >
+                  Richtig
+                </button>
+                <button
+                  onClick={() => handleAnswer(false)}
+                  className="bg-red-500 text-white px-4 py-2 rounded-xl hover:bg-red-600"
+                >
+                  Falsch
+                </button>
+              </div>
+            </>
+          ) : (
+            <button
+              onClick={() => setShowAnswer(true)}
+              className="bg-blue-500 text-white px-4 py-2 rounded-xl hover:bg-blue-600"
+            >
+              Antwort anzeigen
+            </button>
+          )}
+        </div>
+      )}
+
+      {finished && (
+        <div className="bg-white shadow-lg rounded-2xl p-6 text-center">
+          <h2 className="text-2xl font-bold mb-4">Quiz beendet!</h2>
+          <p className="text-lg mb-2">Richtige Antworten: {correct}</p>
+          <p className="text-lg mb-2">Falsche Antworten: {wrong}</p>
+          <p className="text-lg font-semibold text-blue-700 mb-4">Erfolgsquote: {percentCorrect}%</p>
+          <button
+            onClick={restart}
+            className="bg-purple-500 text-white px-6 py-2 rounded-xl hover:bg-purple-600"
+          >
+            Noch einmal
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

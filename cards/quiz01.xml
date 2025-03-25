@@ -1,0 +1,14 @@
+<cards>
+  <card>
+    <question>Was ist das Ziel dieser Lerneinheit?</question>
+    <answer>Ein tieferes Verständnis für Deep Learning in Computer Vision und generativer KI sowie der praktische Umgang mit Deep Learning Frameworks.</answer>
+  </card>
+  <card>
+    <question>Was ist TensorFlow?</question>
+    <answer>Eine von Google unterstützte Programmbibliothek für Deep Learning – komplex, mächtig und plattformabhängig.</answer>
+  </card>
+  <card>
+    <question>Was ist Keras?</question>
+    <answer>Eine benutzerfreundliche High-Level-API für Deep Learning, die auf TensorFlow aufbaut.</answer>
+  </card>
+</cards>
